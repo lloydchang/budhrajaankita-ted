@@ -474,7 +474,6 @@ async def generatePitchAudio(request: PitchTextRequest):
 #     except requests.RequestException as e:
 #         raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
 
-<<<<<<< HEAD
 # from biz_roadmap_generation.gemini_roadmap import gemini_roadmap
 # GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # @app.post("/business_plan_roadmap")
@@ -482,10 +481,6 @@ async def generatePitchAudio(request: PitchTextRequest):
 # async def getPlanning(request):
 #     response = gemini_roadmap()
 #     return response
-=======
-from biz_roadmap_generation.gemini_roadmap import gemini_roadmap
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
->>>>>>> 8d276743b0f8c72ec04c6fc1900c3d1c62d4623b
 
 
 @app.post("/business_plan_roadmap")
@@ -504,11 +499,6 @@ async def getPlan(request: ChatRequest):
                         "role": "system",
                         "content": "You are a consultant for non-profits. You receive details on the type of non-profit your client wants to create. You have 20 years of experience advising for clients across the globe, and specialize in creating business plans and actionable roadmaps for aspirational non-profit founders. You consider your clients' country of operation when providing advice. When you provide advice, you include website links to resources for your clients to follow. Double check these links work. Your output is a step-by-step non-profit creation plan with a timeline. Exclude fundraising from the step-by-step plan but include it in the timeline"
                     },
-                    # {
-                    #     "role": "user",
-                    #     # "content": "Considering this particular idea, Please provide steps on how I can connect with investors and list the investors I can potentially connect with, steps to take, and things to keep in mind during this."
-                    #     "content": "Please advise on how to create my non-profit, Meowsicals. Our goal is to bring the joy of music to stray cats in Eritrea. Our goal is for 15 percent of our stray cat population to be serenaded at least once a week"
-                    # },
                     {
                         "role": "user",
                         "content": request_json
