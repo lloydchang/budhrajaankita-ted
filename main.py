@@ -194,20 +194,20 @@ Use a conversational yet professional tone, incorporate storytelling elements, a
         result = response.json()
         
         if "choices" in result and len(result["choices"]) > 0:
-            propContent = response.json()["choices"][0]["message"]["content"]
+            return response.json()["choices"][0]["message"]["content"]
 
-            pdf_bytes = text_to_pdf(propContent)
-            # Return the PDF as a downloadable file
-            return Response(
-                content=pdf_bytes,
-                media_type="application/pdf",
-                headers={"Content-Disposition": "attachment; filename=grant_proposal.pdf"}
-            )
-                # return FileResponse(
-                #     pdf_buffer,
-                #     media_type="application/pdf",
-                #     headers={"Content-Disposition": "attachment; filename=grant_proposal.pdf"}
-                # )
+            # pdf_bytes = text_to_pdf(propContent)
+            # # Return the PDF as a downloadable file
+            # return Response(
+            #     content=pdf_bytes,
+            #     media_type="application/pdf",
+            #     headers={"Content-Disposition": "attachment; filename=grant_proposal.pdf"}
+            # )
+            #     # return FileResponse(
+            #     #     pdf_buffer,
+            #     #     media_type="application/pdf",
+            #     #     headers={"Content-Disposition": "attachment; filename=grant_proposal.pdf"}
+            #     # )
 
 
         else:
