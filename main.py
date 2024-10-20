@@ -282,6 +282,7 @@ async def generatePitchText(request: ChatRequest):
 
 
 
+
 @app.post("/generatePitchAudio")
 async def generatePitchAudio(pitch_text: PitchTextRequest):
     try:
