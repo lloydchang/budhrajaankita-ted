@@ -13,7 +13,7 @@
     ],
     "functions": {
     "main.py": {
-      "maxDuration": 90
+      "maxDuration": 150
     }
   }
   }
