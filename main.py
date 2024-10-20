@@ -10,11 +10,27 @@ from fastapi.responses import FileResponse
 import io
 from dotenv import load_dotenv
 load_dotenv()
+from elevenlabs import text_to_speech
+from elevenlabs.client import ElevenLabs
+from reportlab.lib.pagesizes import letter
+from reportlab.platypus import SimpleDocTemplate, Paragraph
+from reportlab.lib.styles import getSampleStyleSheet
+from io import BytesIO
+from fastapi import FastAPI, HTTPException, Response
+import requests
+from pydub.playback import play as pydub_play
+from pydub import AudioSegment
 
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
 
+ElevenLabs.api_key = os.getenv("ELEVENLABS_API_KEY")
+
+
+client = ElevenLabs(
+  api_key=ElevenLabs.api_key
+)
 
 
 app.add_middleware(
@@ -24,12 +40,7 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
-from reportlab.lib.pagesizes import letter
-from reportlab.platypus import SimpleDocTemplate, Paragraph
-from reportlab.lib.styles import getSampleStyleSheet
-from io import BytesIO
-from fastapi import FastAPI, HTTPException, Response
-import requests
+
 
 def text_to_pdf(text):
     buffer = BytesIO()
@@ -215,5 +226,107 @@ Use a conversational yet professional tone, incorporate storytelling elements, a
     
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
+
+
+
+
+
+
+
+@app.post("/generatePitch")
+async def generatePitch(request: ChatRequest):
+    try:
+        prompt = f"""Create the transcript for a short compelling elevator pitch for a sustainable project or idea that aligns with the United Nations Sustainable Development Goals (SDGs). It should include:
+A Clear Introduction: Briefly introduce the project or idea and its relevance to sustainability.
+The Problem Statement: Identify the specific environmental or social issue your idea addresses.
+The Solution: Explain how your project provides a unique and effective solution to this problem.
+Impact on SDGs: Highlight how your idea contributes to one or more SDGs, particularly focusing on climate action, clean water, or sustainable communities.
+Call to Action: Encourage listeners to get involved, support the project, or learn more.
+Make sure the pitch is engaging, concise (around 30-60 seconds), and emotionally resonant, appealing to the audience's sense of responsibility towards a sustainable future. Only generate the transcript, no ** or ##. Just output the transcript."""
+
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            },
+            json={
+                "model": "meta-llama/llama-3.2-3b-instruct:free",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a helpful assistant, expert in CREATING STELLAR elevator pitches for non-profits. Provide concise and accurate responses."
+                    },
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            }
+        )
+
+        response.raise_for_status()
+        result = response.json()
+        
+        if "choices" in result and len(result["choices"]) > 0:
+            cont =  response.json()["choices"][0]["message"]["content"]
+
+
+
+            audio_generator = client.generate(
+                text=cont,
+                voice="bIHbv24MWmeRgasZH58o"
+                # "cjVigY5qzO86Huf0OWal"
+            )
+
+            audio_chunks = b''.join(chunk for chunk in audio_generator)
+
+            try:
+                with open("pitch.wav", "wb") as f:
+                    f.write(audio_chunks)
+
+                if os.path.exists("pitch.wav"):
+                    audio_segment = AudioSegment.from_wav("pitch.wav")
+                    pydub_play(audio_segment)
+                else:
+                    print("Error: pitch.wav file not found")
+
+            except Exception as e:
+                print(f"Error playing audio: {str(e)}")
+                
+            # with open("pitch.wav", "wb") as f:
+            #     f.write(audio_chunks)
+
+            # # Play the audio using pydub
+            # audio_segment = AudioSegment.from_wav("pitch.wav")
+            # pydub_play(audio_segment)
+
+    except requests.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
+
+
+# # request_json = request.json()
+#         idea_description = request.json()
+        
+#         import requests
+
+#         url = "https://studio.infinity.ai/api/v2/generate"
+#         headers = {
+#             "accept": "application/json",
+#             "authorization": "Bearer YOUR_API_TOKEN",
+#             "content-type": "application/json"
+#         }
+#         data = {
+#             "resolution": "320",
+#             "crop_head": False,
+#             "make_stable": False,
+#             "img_url": "https://6ammc3n5zzf5ljnz.public.blob.vercel-storage.com/inf2-defaults/cool_man-AZGi3AIjUGN47rGxA8xdHMBGr1Qqha.png",
+#             "audio_url": "https://6ammc3n5zzf5ljnz.public.blob.vercel-storage.com/cool_man-eUP4h3ET8OHCP2ScZvei5CVnQUx2Mi.mp3"
+#         }
+
+#         response = requests.post(url, headers=headers, json=data)
+
+#         print(response.json())
+#     except requests.RequestException as e:
+#         raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
 
 
