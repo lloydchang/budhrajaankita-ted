@@ -1,0 +1,22 @@
+{
+    "name": "",
+    "mission": "",
+    "goals": [],
+    "targetMarket": {
+        "entity": "",
+        "income": "",
+        "occupation": "",
+        "geography": "",
+        "marginalizedIdentity": ""
+    },
+    "primaryProduct": "",
+    "sdgs": [],
+    "sources": {
+        "name": [],
+        "mission": [],
+        "goals": [],
+        "targetMarket": [],
+        "primaryProduct": [],
+        "sdgs": []
+    }
+}
