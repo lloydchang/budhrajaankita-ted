@@ -472,9 +472,51 @@ async def generatePitchAudio(request: Request):
 #     except requests.RequestException as e:
 #         raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
 
-from biz_roadmap_generation.gemini_roadmap import gemini_roadmap
-GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# from biz_roadmap_generation.gemini_roadmap import gemini_roadmap
+# GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+# @app.post("/business_plan_roadmap")
+# # async def getPlanning(request: ChatRequest):
+# async def getPlanning(request):
+#     response = gemini_roadmap()
+#     return response
+
+
 @app.post("/business_plan_roadmap")
-async def getPlanning(request: ChatRequest):
-    response = gemini_roadmap()
-    return response
+async def getPlan(request: ChatRequest):
+    try:
+        request_json = request.json()
+        response = requests.post(
+            url="https://openrouter.ai/api/v1/chat/completions",
+            headers={
+                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+            },
+           json={
+                "model": "meta-llama/llama-3.2-3b-instruct:free",
+                "messages": [
+                    {
+                        "role": "system",
+                        "content": "You are a consultant for non-profits. You receive details on the type of non-profit your client wants to create. You have 20 years of experience advising for clients across the globe, and specialize in creating business plans and actionable roadmaps for aspirational non-profit founders. You consider your clients' country of operation when providing advice. When you provide advice, you include website links to resources for your clients to follow. Double check these links work. Your output is a step-by-step non-profit creation plan with a timeline"
+                    },
+                    # {
+                    #     "role": "user",
+                    #     # "content": "Considering this particular idea, Please provide steps on how I can connect with investors and list the investors I can potentially connect with, steps to take, and things to keep in mind during this."
+                    #     "content": "Please advise on how to create my non-profit, Meowsicals. Our goal is to bring the joy of music to stray cats in Eritrea. Our goal is for 15 percent of our stray cat population to be serenaded at least once a week"
+                    # },
+                    {
+                        "role": "user",
+                        "content": request_json
+                    }
+                ]
+            }
+        )
+        
+        response.raise_for_status()
+        result = response.json()
+        
+        if "choices" in result and len(result["choices"]) > 0:
+            return response.json()["choices"][0]["message"]["content"]
+        else:
+            raise HTTPException(status_code=500, detail="Unexpected response format from OpenRouter API")
+    
+    except requests.RequestException as e:
+        raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
