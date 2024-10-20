@@ -72,6 +72,10 @@ class IdeaModel(BaseModel):
 class ChatRequest(BaseModel):
     idea: IdeaModel
 
+
+class PitchTextRequest(BaseModel):
+    pitch_text: str
+
 # class ChatRequest(BaseModel):
 #     message: str
 
@@ -279,10 +283,10 @@ async def generatePitchText(request: ChatRequest):
 
 
 @app.post("/generatePitchAudio")
-async def generatePitchAudio(pitch_text: str):
+async def generatePitchAudio(pitch_text: PitchTextRequest):
     try:
         audio_generator = client.generate(
-            text=pitch_text,
+            text=request.pitch_text,
             voice="bIHbv24MWmeRgasZH58o"
         )
 
