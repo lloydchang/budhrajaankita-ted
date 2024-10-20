@@ -312,7 +312,6 @@ async def generatePitchAudio(request: Request):
         raise HTTPException(status_code=500, detail=f"Error generating audio: {str(e)}")
 
 
-
 # @app.post("/generatePitchAudio")
 # async def generatePitchAudio(pitch_text: PitchTextRequest):
 #     try:
