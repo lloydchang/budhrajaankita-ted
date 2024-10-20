@@ -233,7 +233,9 @@ Use a conversational yet professional tone, incorporate storytelling elements, a
 @app.post("/generatePitchText")
 async def generatePitchText(request: ChatRequest):
     try:
-        prompt = f"""Create the transcript for a short compelling elevator pitch for a sustainable project or idea that aligns with the United Nations Sustainable Development Goals (SDGs). It should include:
+
+        request_json = request.json()
+        prompt = f"""Create the transcript for a short compelling elevator pitch for this project {request_json} that aligns with the United Nations Sustainable Development Goals (SDGs). It should include:
         A Clear Introduction: Briefly introduce the project or idea and its relevance to sustainability.
         The Problem Statement: Identify the specific environmental or social issue your idea addresses.
         The Solution: Explain how your project provides a unique and effective solution to this problem.
@@ -265,8 +267,9 @@ async def generatePitchText(request: ChatRequest):
         result = response.json()
         
         if "choices" in result and len(result["choices"]) > 0:
-            cont = result["choices"][0]["message"]["content"]
-            return {"pitch_text": cont}
+            return response.json()["choices"][0]["message"]["content"]
+            # cont = result["choices"][0]["message"]["content"]
+            # return {"pitch_text": cont}
         else:
             raise HTTPException(status_code=500, detail="Unexpected response format from OpenRouter API")
 
@@ -299,7 +302,7 @@ async def generatePitchAudio(pitch_text: str):
 # @app.post("/generatePitch")
 # async def generatePitch(request: ChatRequest):
 #     try:
-#         prompt = f"""Create the transcript for a short compelling elevator pitch for a sustainable project or idea that aligns with the United Nations Sustainable Development Goals (SDGs). It should include:
+#         prompt = f"""Create the transcript for a short compelling elevator pitch for this project {request_json} that aligns with the United Nations Sustainable Development Goals (SDGs). It should include:
 # A Clear Introduction: Briefly introduce the project or idea and its relevance to sustainability.
 # The Problem Statement: Identify the specific environmental or social issue your idea addresses.
 # The Solution: Explain how your project provides a unique and effective solution to this problem.
