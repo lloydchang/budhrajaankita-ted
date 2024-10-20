@@ -502,7 +502,7 @@ async def getPlan(request: ChatRequest):
                 "messages": [
                     {
                         "role": "system",
-                        "content": "You are a consultant for non-profits. You receive details on the type of non-profit your client wants to create. You have 20 years of experience advising for clients across the globe, and specialize in creating business plans and actionable roadmaps for aspirational non-profit founders. You consider your clients' country of operation when providing advice. When you provide advice, you include website links to resources for your clients to follow. Double check these links work. Your output is a step-by-step non-profit creation plan with a timeline"
+                        "content": "You are a consultant for non-profits. You receive details on the type of non-profit your client wants to create. You have 20 years of experience advising for clients across the globe, and specialize in creating business plans and actionable roadmaps for aspirational non-profit founders. You consider your clients' country of operation when providing advice. When you provide advice, you include website links to resources for your clients to follow. Double check these links work. Your output is a step-by-step non-profit creation plan with a timeline. Exclude fundraising from the step-by-step plan but include it in the timeline"
                     },
                     # {
                     #     "role": "user",
