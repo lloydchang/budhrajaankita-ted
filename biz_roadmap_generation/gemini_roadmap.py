@@ -32,6 +32,7 @@ def gemini_roadmap():
 
   # response = model.generate_content("Good morning! How are you?")
   response = model.generate_content(user_prompt)
-  print(response.text)
+  return response.text
+  # print(response.text)
 
-gemini_roadmap()
+# gemini_roadmap()
