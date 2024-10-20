@@ -20,7 +20,7 @@ from fastapi import FastAPI, HTTPException, Response
 import requests
 from pydub.playback import play as pydub_play
 from pydub import AudioSegment
-
+from duckduckgo_search import DDGS
 from fastapi.middleware.cors import CORSMiddleware
 
 app = FastAPI()
@@ -42,6 +42,43 @@ app.add_middleware(
     allow_methods=["*"],  # Allows all methods
     allow_headers=["*"],  # Allows all headers
 )
+
+
+def integrate_duckduckgo(query: str, max_results: int = 3) -> str:
+    """Fetches DuckDuckGo search results and formats them as citations."""
+    try:
+        results = duckduckgo_search(query, max_results=max_results)
+        if not results:
+            return "\n\nCitations: No relevant citations found."
+        citations = "\n".join([f"[{i+1}] {res['title']}: {res['link']}" for i, res in enumerate(results)])
+        return f"\n\nCitations:\n{citations}"
+    except Exception as e:
+        return f"\n\nCitations: DuckDuckGo search error: {str(e)}"
+
+
+def ddg_search(query: str, max_results: int = 3) -> list:
+    """Performs DuckDuckGo search and returns results"""
+    try:
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=max_results))
+            return results
+    except Exception as e:
+        print(f"DuckDuckGo search error: {e}")
+        return []
+
+
+# Added: Corrected integrate_duckduckgo function to use 'href' instead of 'link'
+def integrate_duckduckgo(query: str, max_results: int = 3) -> str:
+    """Fetches DuckDuckGo search results and formats them as citations."""
+    try:
+        results = ddg_search(query, max_results=max_results)
+        if not results:
+            return "\n\nCitations: No relevant citations found."
+        citations = "\n".join([f"[{i+1}] {res['title']}: {res['href']}" for i, res in enumerate(results)])
+        return f"\n\nCitations:\n{citations}"
+    except Exception as e:
+        return f"\n\nCitations: DuckDuckGo search error: {str(e)}"
+
 
 
 def text_to_pdf(text):
@@ -115,10 +152,15 @@ async def getInvestors(request: ChatRequest):
         result = response.json()
         
         if "choices" in result and len(result["choices"]) > 0:
-            return response.json()["choices"][0]["message"]["content"]
+            main_content = response.json()["choices"][0]["message"]["content"]
+
         else:
             raise HTTPException(status_code=500, detail="Unexpected response format from OpenRouter API")
-    
+        
+        query = f"Investors for {request.idea.mission}"
+        citations = integrate_duckduckgo(query)
+        return main_content + citations
+
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
 
@@ -157,10 +199,14 @@ async def getGrantInfo(request: ChatRequest):
         result = response.json()
         
         if "choices" in result and len(result["choices"]) > 0:
-            return response.json()["choices"][0]["message"]["content"]
+            main_content = response.json()["choices"][0]["message"]["content"]
         else:
             raise HTTPException(status_code=500, detail="Unexpected response format from OpenRouter API")
-    
+
+        query = f"Grants for {request.idea.mission}"
+        citations = integrate_duckduckgo(query)
+        return main_content + citations
+
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
 
@@ -211,7 +257,14 @@ Use a conversational yet professional tone, incorporate storytelling elements, a
         result = response.json()
         
         if "choices" in result and len(result["choices"]) > 0:
-            return response.json()["choices"][0]["message"]["content"]
+            propContent = response.json()["choices"][0]["message"]["content"]
+
+            query = f"Grant proposal examples for {request.idea.mission}"
+            citations = integrate_duckduckgo(query)
+            combined_content = propContent + citations
+
+            return combined_content
+
 
             # pdf_bytes = text_to_pdf(propContent)
             # # Return the PDF as a downloadable file
@@ -513,9 +566,14 @@ async def getPlan(request: ChatRequest):
         result = response.json()
         
         if "choices" in result and len(result["choices"]) > 0:
-            return response.json()["choices"][0]["message"]["content"]
+            response_content = response.json()["choices"][0]["message"]["content"]
         else:
             raise HTTPException(status_code=500, detail="Unexpected response format from OpenRouter API")
-    
+
+        query = f"Business plan roadmap for {request.idea.mission}"
+        citations = integrate_duckduckgo(query)
+        combined_response = response_content + citations
+        return combined_response
+
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
