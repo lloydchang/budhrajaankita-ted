@@ -28,6 +28,8 @@ app = FastAPI()
 ElevenLabs.api_key = os.getenv("ELEVENLABS_API_KEY")
 
 
+print(os.getenv("ELEVENLABS_API_KEY"))
+
 client = ElevenLabs(
   api_key=ElevenLabs.api_key
 )
@@ -281,50 +283,10 @@ async def generatePitchText(request: ChatRequest):
 
 
 
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import Response
-from io import BytesIO
-import asyncio
-
-@app.post("/generatePitchAudio")
-async def generatePitchAudio(request: Request):
-    try:
-        body = await request.json()
-        pitch_text = body.get("pitch_text")
-
-        if not pitch_text or not isinstance(pitch_text, str):
-            raise ValueError("Invalid or missing pitch_text in request body")
-
-        print(f"Received pitch_text: {pitch_text[:100]}...")
-
-        # Use asyncio.wait_for to add a timeout
-        audio_generator = await asyncio.wait_for(
-            client.generate(
-                text=pitch_text,
-                voice="bIHbv24MWmeRgasZH58o"
-            ),
-            timeout=30  # Adjust timeout as needed
-        )
-
-        audio_chunks = b''.join(chunk for chunk in audio_generator)
-
-        # Use BytesIO instead of writing to disk
-        audio_buffer = BytesIO(audio_chunks)
-        audio_buffer.seek(0)
-
-        return Response(
-            content=audio_buffer.getvalue(),
-            media_type="audio/wav",
-            headers={"Content-Disposition": "attachment; filename=pitch.wav"}
-        )
-
-    except ValueError as ve:
-        raise HTTPException(status_code=400, detail=str(ve))
-    except asyncio.TimeoutError:
-        raise HTTPException(status_code=504, detail="Audio generation timed out")
-    except Exception as e:
-        print(f"Error details: {str(e)}")
-        raise HTTPException(status_code=500, detail=f"Error generating audio: {str(e)}")
+# from fastapi import FastAPI, HTTPException, Request
+# from fastapi.responses import Response
+# from io import BytesIO
+# import asyncio
 
 # @app.post("/generatePitchAudio")
 # async def generatePitchAudio(request: Request):
@@ -337,23 +299,63 @@ async def generatePitchAudio(request: Request):
 
 #         print(f"Received pitch_text: {pitch_text[:100]}...")
 
-#         audio_generator = client.generate(
-#             text=pitch_text,
-#             voice="bIHbv24MWmeRgasZH58o"
+#         # Use asyncio.wait_for to add a timeout
+#         audio_generator = await asyncio.wait_for(
+#             client.generate(
+#                 text=pitch_text,
+#                 voice="bIHbv24MWmeRgasZH58o"
+#             ),
+#             timeout=30  # Adjust timeout as needed
 #         )
 
 #         audio_chunks = b''.join(chunk for chunk in audio_generator)
 
-#         with open("pitch.wav", "wb") as f:
-#             f.write(audio_chunks)
+#         # Use BytesIO instead of writing to disk
+#         audio_buffer = BytesIO(audio_chunks)
+#         audio_buffer.seek(0)
 
-#         return FileResponse("pitch.wav", media_type="audio/wav", filename="pitch.wav")
+#         return Response(
+#             content=audio_buffer.getvalue(),
+#             media_type="audio/wav",
+#             headers={"Content-Disposition": "attachment; filename=pitch.wav"}
+#         )
 
 #     except ValueError as ve:
 #         raise HTTPException(status_code=400, detail=str(ve))
+#     except asyncio.TimeoutError:
+#         raise HTTPException(status_code=504, detail="Audio generation timed out")
 #     except Exception as e:
-#         print(f"Error details: {str(e)}")  # Log the full error details
+#         print(f"Error details: {str(e)}")
 #         raise HTTPException(status_code=500, detail=f"Error generating audio: {str(e)}")
+
+@app.post("/generatePitchAudio")
+async def generatePitchAudio(request: PitchTextRequest):
+    try:
+        # body = await request.json()
+        pitch_text = request.pitch_text
+
+        if not pitch_text or not isinstance(pitch_text, str):
+            raise ValueError("Invalid or missing pitch_text in request body")
+
+        print(f"Received pitch_text: {pitch_text[:100]}...")
+
+        audio_generator = client.generate(
+            text=pitch_text,
+            voice="bIHbv24MWmeRgasZH58o"
+        )
+
+        audio_chunks = b''.join(chunk for chunk in audio_generator)
+
+        with open("pitch.wav", "wb") as f:
+            f.write(audio_chunks)
+
+        return FileResponse("pitch.wav", media_type="audio/wav", filename="pitch.wav")
+
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
+    except Exception as e:
+        print(f"Error details: {str(e)}")  # Log the full error details
+        raise HTTPException(status_code=500, detail=f"Error generating audio: {str(e)}")
 
 
 # @app.post("/generatePitchAudio")
@@ -472,6 +474,7 @@ async def generatePitchAudio(request: Request):
 #     except requests.RequestException as e:
 #         raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
 
+<<<<<<< HEAD
 # from biz_roadmap_generation.gemini_roadmap import gemini_roadmap
 # GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 # @app.post("/business_plan_roadmap")
@@ -479,6 +482,10 @@ async def generatePitchAudio(request: Request):
 # async def getPlanning(request):
 #     response = gemini_roadmap()
 #     return response
+=======
+from biz_roadmap_generation.gemini_roadmap import gemini_roadmap
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+>>>>>>> 8d276743b0f8c72ec04c6fc1900c3d1c62d4623b
 
 
 @app.post("/business_plan_roadmap")
