@@ -282,10 +282,17 @@ async def generatePitchText(request: ChatRequest):
 
 
 
-
 @app.post("/generatePitchAudio")
-async def generatePitchAudio(pitch_text: PitchTextRequest):
+async def generatePitchAudio(request: Request):
     try:
+        body = await request.json()
+        pitch_text = body.get("pitch_text")
+
+        if not pitch_text or not isinstance(pitch_text, str):
+            raise ValueError("Invalid or missing pitch_text in request body")
+
+        print(f"Received pitch_text: {pitch_text[:100]}...")
+
         audio_generator = client.generate(
             text=pitch_text,
             voice="bIHbv24MWmeRgasZH58o"
@@ -298,8 +305,31 @@ async def generatePitchAudio(pitch_text: PitchTextRequest):
 
         return FileResponse("pitch.wav", media_type="audio/wav", filename="pitch.wav")
 
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
+        print(f"Error details: {str(e)}")  # Log the full error details
         raise HTTPException(status_code=500, detail=f"Error generating audio: {str(e)}")
+
+
+
+# @app.post("/generatePitchAudio")
+# async def generatePitchAudio(pitch_text: PitchTextRequest):
+#     try:
+#         audio_generator = client.generate(
+#             text=pitch_text,
+#             voice="bIHbv24MWmeRgasZH58o"
+#         )
+
+#         audio_chunks = b''.join(chunk for chunk in audio_generator)
+
+#         with open("pitch.wav", "wb") as f:
+#             f.write(audio_chunks)
+
+#         return FileResponse("pitch.wav", media_type="audio/wav", filename="pitch.wav")
+
+#     except Exception as e:
+#         raise HTTPException(status_code=500, detail=f"Error generating audio: {str(e)}")
 
 
 
