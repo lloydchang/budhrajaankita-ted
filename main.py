@@ -429,6 +429,7 @@ async def generatePitchAudio(request: Request):
 #     except requests.RequestException as e:
 #         raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
 
+from biz_roadmap_generation.gemini_roadmap import gemini_roadmap
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 @app.post("/business_plan_roadmap")
 async def getPlanning(request: ChatRequest):
