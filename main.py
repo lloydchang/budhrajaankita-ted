@@ -230,19 +230,16 @@ Use a conversational yet professional tone, incorporate storytelling elements, a
 
 
 
-
-
-
-@app.post("/generatePitch")
-async def generatePitch(request: ChatRequest):
+@app.post("/generatePitchText")
+async def generatePitchText(request: ChatRequest):
     try:
         prompt = f"""Create the transcript for a short compelling elevator pitch for a sustainable project or idea that aligns with the United Nations Sustainable Development Goals (SDGs). It should include:
-A Clear Introduction: Briefly introduce the project or idea and its relevance to sustainability.
-The Problem Statement: Identify the specific environmental or social issue your idea addresses.
-The Solution: Explain how your project provides a unique and effective solution to this problem.
-Impact on SDGs: Highlight how your idea contributes to one or more SDGs, particularly focusing on climate action, clean water, or sustainable communities.
-Call to Action: Encourage listeners to get involved, support the project, or learn more.
-Make sure the pitch is engaging, concise (around 30-60 seconds), and emotionally resonant, appealing to the audience's sense of responsibility towards a sustainable future. Only generate the transcript, no ** or ##. Just output the transcript."""
+        A Clear Introduction: Briefly introduce the project or idea and its relevance to sustainability.
+        The Problem Statement: Identify the specific environmental or social issue your idea addresses.
+        The Solution: Explain how your project provides a unique and effective solution to this problem.
+        Impact on SDGs: Highlight how your idea contributes to one or more SDGs, particularly focusing on climate action, clean water, or sustainable communities.
+        Call to Action: Encourage listeners to get involved, support the project, or learn more.
+        Make sure the pitch is engaging, concise (around 30-60 seconds), and emotionally resonant, appealing to the audience's sense of responsibility towards a sustainable future. Only generate the transcript, no ** or ##. Just output the transcript."""
 
         response = requests.post(
             url="https://openrouter.ai/api/v1/chat/completions",
@@ -268,40 +265,106 @@ Make sure the pitch is engaging, concise (around 30-60 seconds), and emotionally
         result = response.json()
         
         if "choices" in result and len(result["choices"]) > 0:
-            cont =  response.json()["choices"][0]["message"]["content"]
-
-
-
-            audio_generator = client.generate(
-                text=cont,
-                voice="bIHbv24MWmeRgasZH58o"
-                # "cjVigY5qzO86Huf0OWal"
-            )
-
-            audio_chunks = b''.join(chunk for chunk in audio_generator)
-
-            try:
-                with open("pitch.wav", "wb") as f:
-                    f.write(audio_chunks)
-
-                if os.path.exists("pitch.wav"):
-                    audio_segment = AudioSegment.from_wav("pitch.wav")
-                    pydub_play(audio_segment)
-                else:
-                    print("Error: pitch.wav file not found")
-
-            except Exception as e:
-                print(f"Error playing audio: {str(e)}")
-                
-            # with open("pitch.wav", "wb") as f:
-            #     f.write(audio_chunks)
-
-            # # Play the audio using pydub
-            # audio_segment = AudioSegment.from_wav("pitch.wav")
-            # pydub_play(audio_segment)
+            cont = result["choices"][0]["message"]["content"]
+            return {"pitch_text": cont}
+        else:
+            raise HTTPException(status_code=500, detail="Unexpected response format from OpenRouter API")
 
     except requests.RequestException as e:
         raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
+
+
+
+
+@app.post("/generatePitchAudio")
+async def generatePitchAudio(pitch_text: str):
+    try:
+        audio_generator = client.generate(
+            text=pitch_text,
+            voice="bIHbv24MWmeRgasZH58o"
+        )
+
+        audio_chunks = b''.join(chunk for chunk in audio_generator)
+
+        with open("pitch.wav", "wb") as f:
+            f.write(audio_chunks)
+
+        return FileResponse("pitch.wav", media_type="audio/wav", filename="pitch.wav")
+
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error generating audio: {str(e)}")
+
+
+
+# @app.post("/generatePitch")
+# async def generatePitch(request: ChatRequest):
+#     try:
+#         prompt = f"""Create the transcript for a short compelling elevator pitch for a sustainable project or idea that aligns with the United Nations Sustainable Development Goals (SDGs). It should include:
+# A Clear Introduction: Briefly introduce the project or idea and its relevance to sustainability.
+# The Problem Statement: Identify the specific environmental or social issue your idea addresses.
+# The Solution: Explain how your project provides a unique and effective solution to this problem.
+# Impact on SDGs: Highlight how your idea contributes to one or more SDGs, particularly focusing on climate action, clean water, or sustainable communities.
+# Call to Action: Encourage listeners to get involved, support the project, or learn more.
+# Make sure the pitch is engaging, concise (around 30-60 seconds), and emotionally resonant, appealing to the audience's sense of responsibility towards a sustainable future. Only generate the transcript, no ** or ##. Just output the transcript."""
+
+#         response = requests.post(
+#             url="https://openrouter.ai/api/v1/chat/completions",
+#             headers={
+#                 "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+#             },
+#             json={
+#                 "model": "meta-llama/llama-3.2-3b-instruct:free",
+#                 "messages": [
+#                     {
+#                         "role": "system",
+#                         "content": "You are a helpful assistant, expert in CREATING STELLAR elevator pitches for non-profits. Provide concise and accurate responses."
+#                     },
+#                     {
+#                         "role": "user",
+#                         "content": prompt
+#                     }
+#                 ]
+#             }
+#         )
+
+#         response.raise_for_status()
+#         result = response.json()
+        
+#         if "choices" in result and len(result["choices"]) > 0:
+#             cont =  response.json()["choices"][0]["message"]["content"]
+
+
+
+#             audio_generator = client.generate(
+#                 text=cont,
+#                 voice="bIHbv24MWmeRgasZH58o"
+#                 # "cjVigY5qzO86Huf0OWal"
+#             )
+
+#             audio_chunks = b''.join(chunk for chunk in audio_generator)
+
+#             try:
+#                 with open("pitch.wav", "wb") as f:
+#                     f.write(audio_chunks)
+
+#                 if os.path.exists("pitch.wav"):
+#                     audio_segment = AudioSegment.from_wav("pitch.wav")
+#                     pydub_play(audio_segment)
+#                 else:
+#                     print("Error: pitch.wav file not found")
+
+#             except Exception as e:
+#                 print(f"Error playing audio: {str(e)}")
+                
+#             # with open("pitch.wav", "wb") as f:
+#             #     f.write(audio_chunks)
+
+#             # # Play the audio using pydub
+#             # audio_segment = AudioSegment.from_wav("pitch.wav")
+#             # pydub_play(audio_segment)
+
+#     except requests.RequestException as e:
+#         raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
 
 
 # # request_json = request.json()
