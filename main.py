@@ -229,7 +229,6 @@ Use a conversational yet professional tone, incorporate storytelling elements, a
 
 
 
-
 @app.post("/generatePitchText")
 async def generatePitchText(request: ChatRequest):
     try:
