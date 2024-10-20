@@ -287,7 +287,7 @@ async def generatePitchText(request: ChatRequest):
 async def generatePitchAudio(pitch_text: PitchTextRequest):
     try:
         audio_generator = client.generate(
-            text=request.pitch_text,
+            text=pitch_text,
             voice="bIHbv24MWmeRgasZH58o"
         )
 
