@@ -1,0 +1,30 @@
+{
+    "idea": {
+
+   "name": "EcoEd Empowerment",
+
+    "mission": "To provide quality environmental education and sustainable livelihood training to underserved communities, empowering them to combat climate change and poverty simultaneously.",
+    "goals": [
+      "Educate 10,000 individuals on environmental conservation and sustainable practices annually",
+      "Train 5,000 people in green job skills each year",
+      "Implement 100 community-based renewable energy projects in rural areas by 2030",
+      "Reduce poverty rates by 20% in target communities through sustainable livelihood programs"
+    ],
+    "targetMarket": {
+      "entity": "Individuals and communities",
+      "ageRange": "15-65",
+      "income": "Low to middle income",
+      "occupation": "Unemployed, underemployed, or in traditional non-sustainable industries",
+      "geography": "Rural and peri-urban areas in developing countries",
+      "marginalizedIdentity": "Indigenous populations, women, youth"
+    },
+    "primaryProduct": "Integrated environmental education and sustainable livelihood training programs",
+    "sdgs": [
+      "SDG 1: No Poverty",
+      "SDG 4: Quality Education",
+      "SDG 7: Affordable and Clean Energy",
+      "SDG 8: Decent Work and Economic Growth",
+      "SDG 13: Climate Action"
+    ]
+  }
+}

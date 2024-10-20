@@ -1,0 +1,7 @@
+# Python bytecode files
+*.py[cod]
+__pycache__/
+*.so
+
+# My virtual environment
+tedxsdg/
