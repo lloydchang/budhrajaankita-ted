@@ -1,9 +1,10 @@
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTask
 from fastapi.responses import FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any
 import os
+import tempfile
 import requests
 import time
 from dotenv import load_dotenv
@@ -668,10 +669,18 @@ async def generatePitchAudio(request: PitchTextRequest):
 
         audio_chunks = b''.join(chunk for chunk in audio_generator)
 
-        with open("pitch.wav", "wb") as f:
-            f.write(audio_chunks)
+        # Create a temporary file to store the audio
+        with tempfile.NamedTemporaryFile(delete=False, suffix=".wav") as tmp_file:
+            tmp_file.write(audio_chunks)
+            tmp_path = tmp_file.name
 
-        return FileResponse("pitch.wav", media_type="audio/wav", filename="pitch.wav")
+        # Return the file and clean it up after sending
+        return FileResponse(
+            tmp_path, 
+            media_type="audio/wav", 
+            filename="pitch.wav",
+            background=BackgroundTask(lambda: os.remove(tmp_path))
+        )
 
     except ValueError as ve:
         raise HTTPException(status_code=400, detail=str(ve))

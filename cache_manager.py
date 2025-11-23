@@ -18,8 +18,23 @@ class ResponseCache:
             cache_dir: Directory to store cache files
             ttl_hours: Time-to-live for cached responses in hours
         """
-        self.cache_dir = Path(cache_dir)
-        self.cache_dir.mkdir(exist_ok=True)
+        # Detect serverless/read-only environments and use /tmp instead
+        if cache_dir == ".cache":
+            # Try to create the directory to test if filesystem is writable
+            try:
+                test_dir = Path(cache_dir)
+                test_dir.mkdir(exist_ok=True)
+                self.cache_dir = test_dir
+            except (OSError, PermissionError):
+                # Filesystem is read-only (serverless environment)
+                # Use /tmp directory instead
+                print(f"⚠️  Read-only filesystem detected, using /tmp for cache")
+                self.cache_dir = Path("/tmp/.cache")
+                self.cache_dir.mkdir(exist_ok=True)
+        else:
+            self.cache_dir = Path(cache_dir)
+            self.cache_dir.mkdir(exist_ok=True)
+        
         self.ttl = timedelta(hours=ttl_hours)
         
     def _get_cache_key(self, endpoint: str, data: dict) -> str:
