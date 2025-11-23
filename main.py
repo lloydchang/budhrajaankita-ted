@@ -98,33 +98,99 @@ def text_to_pdf(text):
 
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
+GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 
 
-def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", max_retries: int = 3, use_cache: bool = True) -> dict:
+def call_gemini_api(messages: list) -> dict:
     """
-    Make a request to OpenRouter API with caching, rate limiting, and retry logic
+    Call Google Gemini API (Provider 1)
     
     Args:
         messages: List of message dictionaries for the chat completion
-        endpoint_name: Name of the endpoint for cache/rate limit tracking
+        
+    Returns:
+        dict: Response in OpenRouter-compatible format
+        
+    Raises:
+        Exception: If the API call fails
+    """
+    if not GEMINI_API_KEY:
+        raise Exception("GEMINI_API_KEY not configured")
+    
+    # Convert messages to Gemini format
+    # Gemini uses a different format: contents with role and parts
+    gemini_contents = []
+    system_instruction = None
+    
+    for msg in messages:
+        if msg["role"] == "system":
+            # Gemini handles system messages differently
+            system_instruction = msg["content"]
+        else:
+            gemini_contents.append({
+                "role": "user" if msg["role"] == "user" else "model",
+                "parts": [{"text": msg["content"]}]
+            })
+    
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={GEMINI_API_KEY}"
+    
+    payload = {
+        "contents": gemini_contents,
+        "generationConfig": {
+            "temperature": 0.7,
+            "responseMimeType": "text/plain"
+        }
+    }
+    
+    # Add system instruction if present
+    if system_instruction:
+        payload["systemInstruction"] = {
+            "parts": [{"text": system_instruction}]
+        }
+    
+    response = requests.post(
+        url=url,
+        headers={"Content-Type": "application/json"},
+        json=payload,
+        timeout=30
+    )
+    
+    response.raise_for_status()
+    data = response.json()
+    
+    # Extract content from Gemini response
+    content = data.get("candidates", [{}])[0].get("content", {}).get("parts", [{}])[0].get("text", "")
+    
+    if not content:
+        raise Exception("Gemini response missing content")
+    
+    # Convert to OpenRouter-compatible format
+    return {
+        "choices": [{
+            "message": {
+                "content": content,
+                "role": "assistant"
+            }
+        }]
+    }
+
+
+def call_openrouter_api(messages: list, max_retries: int = 3) -> dict:
+    """
+    Call OpenRouter API (Provider 2)
+    
+    Args:
+        messages: List of message dictionaries for the chat completion
         max_retries: Maximum number of retry attempts
-        use_cache: Whether to use caching (default: True)
         
     Returns:
         dict: The API response JSON
         
     Raises:
-        HTTPException: If all retries fail
+        Exception: If all retries fail
     """
-    # Check cache first
-    if use_cache:
-        cache_key = {"messages": messages}
-        cached_response = cache.get(endpoint_name, cache_key)
-        if cached_response is not None:
-            return cached_response
-    
-    # Apply rate limiting before making API call
-    rate_limiter.wait_if_needed(endpoint_name)
+    if not OPENROUTER_API_KEY:
+        raise Exception("OPENROUTER_API_KEY not configured")
     
     for attempt in range(max_retries):
         try:
@@ -136,33 +202,99 @@ def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", m
                 json={
                     "model": "meta-llama/llama-3.2-3b-instruct:free",
                     "messages": messages
-                }
+                },
+                timeout=30
             )
             
             response.raise_for_status()
-            result = response.json()
+            return response.json()
+            
+        except requests.exceptions.HTTPError as e:
+            if response.status_code == 429:  # Rate limit error
+                wait_time = (2 ** attempt) * 2  # Exponential backoff: 2, 4, 8 seconds
+                print(f"OpenRouter rate limited. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
+                if attempt < max_retries - 1:
+                    time.sleep(wait_time)
+                    continue
+            raise Exception(f"OpenRouter API error {response.status_code}: {str(e)}")
+        except requests.RequestException as e:
+            if attempt < max_retries - 1:
+                time.sleep(2)
+                continue
+            raise Exception(f"Error calling OpenRouter API: {str(e)}")
+    
+    raise Exception("Max retries exceeded for OpenRouter API")
+
+
+def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", max_retries: int = 3, use_cache: bool = True) -> dict:
+    """
+    Make a request to LLM providers with multi-provider fallback, caching, and rate limiting
+    
+    Provider order:
+    1. Google Gemini API (if GEMINI_API_KEY is set)
+    2. OpenRouter API (if OPENROUTER_API_KEY is set)
+    
+    Args:
+        messages: List of message dictionaries for the chat completion
+        endpoint_name: Name of the endpoint for cache/rate limit tracking
+        max_retries: Maximum number of retry attempts per provider
+        use_cache: Whether to use caching (default: True)
+        
+    Returns:
+        dict: The API response JSON in OpenRouter-compatible format
+        
+    Raises:
+        HTTPException: If all providers fail
+    """
+    # Check cache first
+    if use_cache:
+        cache_key = {"messages": messages}
+        cached_response = cache.get(endpoint_name, cache_key)
+        if cached_response is not None:
+            print(f"✅ Cache hit for {endpoint_name}")
+            return cached_response
+    
+    # Build list of available providers
+    providers = []
+    if GEMINI_API_KEY:
+        providers.append(("Google Gemini", call_gemini_api))
+        print(f"🔵 Google Gemini API available for {endpoint_name}")
+    if OPENROUTER_API_KEY:
+        providers.append(("OpenRouter", lambda msgs: call_openrouter_api(msgs, max_retries)))
+        print(f"🟢 OpenRouter API available for {endpoint_name}")
+    
+    if not providers:
+        raise HTTPException(status_code=500, detail="No LLM API keys configured")
+    
+    print(f"📡 Attempting {len(providers)} provider(s) for {endpoint_name}")
+    
+    # Try each provider in order
+    last_error = None
+    for provider_name, provider_func in providers:
+        try:
+            print(f"🔄 Trying {provider_name}...")
+            
+            # Apply rate limiting before making API call
+            rate_limiter.wait_if_needed(f"{endpoint_name}_{provider_name}")
+            
+            result = provider_func(messages)
             
             # Cache successful response
             if use_cache:
                 cache.set(endpoint_name, cache_key, result)
             
+            print(f"✅ {provider_name} succeeded for {endpoint_name}")
             return result
             
-        except requests.exceptions.HTTPError as e:
-            if response.status_code == 429:  # Rate limit error
-                wait_time = (2 ** attempt) * 2  # Exponential backoff: 2, 4, 8 seconds
-                print(f"Rate limited. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
-                if attempt < max_retries - 1:
-                    time.sleep(wait_time)
-                    continue
-            raise HTTPException(status_code=response.status_code, detail=f"OpenRouter API error: {str(e)}")
-        except requests.RequestException as e:
-            if attempt < max_retries - 1:
-                time.sleep(2)
-                continue
-            raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
+        except Exception as e:
+            last_error = e
+            print(f"❌ {provider_name} failed: {str(e)}")
+            continue
     
-    raise HTTPException(status_code=500, detail="Max retries exceeded for OpenRouter API")
+    # All providers failed
+    error_msg = f"All LLM providers failed. Last error: {str(last_error)}"
+    print(f"🚨 {error_msg}")
+    raise HTTPException(status_code=500, detail=error_msg)
 
 
 class IdeaModel(BaseModel):
