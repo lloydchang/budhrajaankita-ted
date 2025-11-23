@@ -75,6 +75,67 @@ TEDxSDG has the potential to create significant real-world impact by:
 
 - Next.js (JavaScript front-end framework)
 - FastAPI (Python back-end framework)
+- Python 3.8+
+- Node.js 16+
+
+## Setup Instructions
+
+### Backend Setup
+
+1. **Install Python dependencies:**
+   ```bash
+   pip install -r requirements.txt
+   ```
+
+2. **Configure Environment Variables:**
+   
+   Create a `.env` file in the project root:
+   ```bash
+   cp .env.example .env
+   ```
+   
+   Edit `.env` and add your API keys:
+   ```bash
+   # OpenRouter API Key (REQUIRED for AI text generation)
+   # Get your key from: https://openrouter.ai/keys
+   OPENROUTER_API_KEY=your_openrouter_api_key_here
+   
+   # ElevenLabs API Key (REQUIRED for audio generation)
+   # Get your key from: https://elevenlabs.io/app/settings/api-keys
+   ELEVENLABS_API_KEY=your_elevenlabs_api_key_here
+   ```
+
+3. **Run the backend server:**
+   ```bash
+   uvicorn main:app --reload --port 8000
+   ```
+   
+   The API will be available at `http://localhost:8000`
+
+### API Endpoints
+
+The backend provides the following endpoints:
+
+- `POST /investors` - Get investor recommendations for your non-profit
+- `POST /grantInfo` - Discover potential grants
+- `POST /getGrantProposal` - Generate a comprehensive grant proposal
+- `POST /generatePitchText` - Create an elevator pitch transcript
+- `POST /generatePitchAudio` - Generate audio from pitch text (requires ElevenLabs API key)
+- `POST /business_plan_roadmap` - Generate a business plan and roadmap
+
+### Testing the APIs
+
+Run the test suite to verify all endpoints:
+```bash
+# Quick test (8-second delays)
+python test_apis.py
+
+# Slower test for better rate limit handling (15-second delays)
+python test_apis_slow.py
+```
+
+See `API_TESTING_REPORT.md` for detailed testing results and troubleshooting.
+
 
 # TEDxSDG Search Backend
 

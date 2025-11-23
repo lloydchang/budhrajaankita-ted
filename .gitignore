@@ -1,3 +1,8 @@
 .env
 tedsdg
 venv
+.cache
+__pycache__
+*.pyc
+*.wav
+test_pitch_audio.wav

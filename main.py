@@ -1,38 +1,44 @@
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
-import requests
-import json
-import os
+from fastapi.responses import FileResponse
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 from typing import List, Dict, Any
-from fpdf import FPDF
-from fastapi.responses import FileResponse
-import io
+import os
+import requests
+import time
 from dotenv import load_dotenv
-load_dotenv()
-from elevenlabs import text_to_speech
 from elevenlabs.client import ElevenLabs
 from reportlab.lib.pagesizes import letter
 from reportlab.platypus import SimpleDocTemplate, Paragraph
 from reportlab.lib.styles import getSampleStyleSheet
 from io import BytesIO
-from fastapi import FastAPI, HTTPException, Response
-import requests
-from pydub.playback import play as pydub_play
-from pydub import AudioSegment
 from duckduckgo_search import DDGS
-from fastapi.middleware.cors import CORSMiddleware
+from cache_manager import ResponseCache, RateLimiter
+
+load_dotenv()
 
 app = FastAPI()
 
-ElevenLabs.api_key = os.getenv("ELEVENLABS_API_KEY")
+ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
-
-print(os.getenv("ELEVENLABS_API_KEY"))
+print(f"ElevenLabs API Key loaded: {ELEVENLABS_API_KEY[:10] if ELEVENLABS_API_KEY else 'None'}...")
 
 client = ElevenLabs(
-  api_key=ElevenLabs.api_key
+  api_key=ELEVENLABS_API_KEY
 )
+
+# Initialize caching system
+# Cache responses for 24 hours to reduce API calls
+cache = ResponseCache(cache_dir=".cache", ttl_hours=24)
+
+# Initialize rate limiter
+# Wait at least 60 seconds between OpenRouter API calls
+rate_limiter = RateLimiter(min_interval_seconds=60)
+
+# Clean up expired cache on startup
+cache.clear_expired()
+print(f"📊 Cache stats: {cache.get_stats()}")
+
 
 
 app.add_middleware(
@@ -44,27 +50,20 @@ app.add_middleware(
 )
 
 
-def integrate_duckduckgo(query: str, max_results: int = 3) -> str:
-    """Fetches DuckDuckGo search results and formats them as citations."""
-    try:
-        results = duckduckgo_search(query, max_results=max_results)
-        if not results:
-            return "\n\nCitations: No relevant citations found."
-        citations = "\n".join([f"[{i+1}] {res['title']}: {res['link']}" for i, res in enumerate(results)])
-        return f"\n\nCitations:\n{citations}"
-    except Exception as e:
-        return f"\n\nCitations: DuckDuckGo search error: {str(e)}"
-
-
 def ddg_search(query: str, max_results: int = 3) -> list:
-    """Performs DuckDuckGo search and returns results"""
-    try:
-        with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=max_results))
-            return results
-    except Exception as e:
-        print(f"DuckDuckGo search error: {e}")
-        return []
+    """Performs DuckDuckGo search and returns results with retry logic"""
+    max_retries = 2
+    for attempt in range(max_retries):
+        try:
+            time.sleep(1)  # Add delay to avoid rate limiting
+            with DDGS() as ddgs:
+                results = list(ddgs.text(query, max_results=max_results))
+                return results
+        except Exception as e:
+            print(f"DuckDuckGo search error (attempt {attempt + 1}/{max_retries}): {e}")
+            if attempt < max_retries - 1:
+                time.sleep(2)  # Wait before retry
+    return []
 
 
 # Added: Corrected integrate_duckduckgo function to use 'href' instead of 'link'
@@ -100,6 +99,72 @@ def text_to_pdf(text):
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 
+
+def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", max_retries: int = 3, use_cache: bool = True) -> dict:
+    """
+    Make a request to OpenRouter API with caching, rate limiting, and retry logic
+    
+    Args:
+        messages: List of message dictionaries for the chat completion
+        endpoint_name: Name of the endpoint for cache/rate limit tracking
+        max_retries: Maximum number of retry attempts
+        use_cache: Whether to use caching (default: True)
+        
+    Returns:
+        dict: The API response JSON
+        
+    Raises:
+        HTTPException: If all retries fail
+    """
+    # Check cache first
+    if use_cache:
+        cache_key = {"messages": messages}
+        cached_response = cache.get(endpoint_name, cache_key)
+        if cached_response is not None:
+            return cached_response
+    
+    # Apply rate limiting before making API call
+    rate_limiter.wait_if_needed(endpoint_name)
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                url="https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                },
+                json={
+                    "model": "meta-llama/llama-3.2-3b-instruct:free",
+                    "messages": messages
+                }
+            )
+            
+            response.raise_for_status()
+            result = response.json()
+            
+            # Cache successful response
+            if use_cache:
+                cache.set(endpoint_name, cache_key, result)
+            
+            return result
+            
+        except requests.exceptions.HTTPError as e:
+            if response.status_code == 429:  # Rate limit error
+                wait_time = (2 ** attempt) * 2  # Exponential backoff: 2, 4, 8 seconds
+                print(f"Rate limited. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
+                if attempt < max_retries - 1:
+                    time.sleep(wait_time)
+                    continue
+            raise HTTPException(status_code=response.status_code, detail=f"OpenRouter API error: {str(e)}")
+        except requests.RequestException as e:
+            if attempt < max_retries - 1:
+                time.sleep(2)
+                continue
+            raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
+    
+    raise HTTPException(status_code=500, detail="Max retries exceeded for OpenRouter API")
+
+
 class IdeaModel(BaseModel):
     name: str
     mission: str
@@ -123,37 +188,26 @@ class PitchTextRequest(BaseModel):
 async def getInvestors(request: ChatRequest):
     try:
         request_json = request.json()
-        response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            },
-           json={
-                "model": "meta-llama/llama-3.2-3b-instruct:free",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are a helpful assistant, expert in starting non profits. Provide concise and accurate responses."
-                    },
-                    {
-                        "role": "user",
-                        # "content": "Considering this particular idea, Please provide steps on how I can connect with investors and list the investors I can potentially connect with, steps to take, and things to keep in mind during this."
-                        "content": "The JSON file I provided contains the content of my non-profit idea. Use this to identify potential investors for my non-profit. Create a list of what categories of entities would be interested in investing in non-profits with a mission like mine. Examples of entity categories can be corporations, celebrities, or charities. Create a list of names for each category of entities. Each list should include at least 2 names. Your output should be in markdown format"
-                    },
-                    {
-                        "role": "user",
-                        "content": request_json
-                    }
-                ]
-            }
-        )
         
-        response.raise_for_status()
-        result = response.json()
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant, expert in starting non profits. Provide concise and accurate responses."
+            },
+            {
+                "role": "user",
+                "content": "The JSON file I provided contains the content of my non-profit idea. Use this to identify potential investors for my non-profit. Create a list of what categories of entities would be interested in investing in non-profits with a mission like mine. Examples of entity categories can be corporations, celebrities, or charities. Create a list of names for each category of entities. Each list should include at least 2 names. Your output should be in markdown format"
+            },
+            {
+                "role": "user",
+                "content": request_json
+            }
+        ]
+        
+        result = make_openrouter_request(messages, endpoint_name="investors")
         
         if "choices" in result and len(result["choices"]) > 0:
-            main_content = response.json()["choices"][0]["message"]["content"]
-
+            main_content = result["choices"][0]["message"]["content"]
         else:
             raise HTTPException(status_code=500, detail="Unexpected response format from OpenRouter API")
         
@@ -161,8 +215,11 @@ async def getInvestors(request: ChatRequest):
         citations = integrate_duckduckgo(query)
         return main_content + citations
 
-    except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
 
 
 
@@ -170,36 +227,26 @@ async def getInvestors(request: ChatRequest):
 async def getGrantInfo(request: ChatRequest):
     try:
         request_json = request.json()
-        response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            },
-           json={
-                "model": "meta-llama/llama-3.2-3b-instruct:free",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are a helpful assistant, expert in starting non profits. Provide concise and accurate responses."
-                    },
-                    {
-                        "role": "user",
-                        # "content": "Considering this particular idea, Please provide steps on how I can connect with investors and list the investors I can potentially connect with, steps to take, and things to keep in mind during this."
-                        "content": "The JSON file I provided contains the content of my non-profit idea. Use this to identify potential grants I can apply to, for my non-profit. Create a list of entities that would be interested in providing grants to non-profits with a mission like mine. Your output should be in markdown format"
-                    },
-                    {
-                        "role": "user",
-                        "content": request_json
-                    }
-                ]
-            }
-        )
         
-        response.raise_for_status()
-        result = response.json()
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant, expert in starting non profits. Provide concise and accurate responses."
+            },
+            {
+                "role": "user",
+                "content": "The JSON file I provided contains the content of my non-profit idea. Use this to identify potential grants I can apply to, for my non-profit. Create a list of entities that would be interested in providing grants to non-profits with a mission like mine. Your output should be in markdown format"
+            },
+            {
+                "role": "user",
+                "content": request_json
+            }
+        ]
+        
+        result = make_openrouter_request(messages, endpoint_name="grantInfo")
         
         if "choices" in result and len(result["choices"]) > 0:
-            main_content = response.json()["choices"][0]["message"]["content"]
+            main_content = result["choices"][0]["message"]["content"]
         else:
             raise HTTPException(status_code=500, detail="Unexpected response format from OpenRouter API")
 
@@ -207,15 +254,17 @@ async def getGrantInfo(request: ChatRequest):
         citations = integrate_duckduckgo(query)
         return main_content + citations
 
-    except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
 
 
 
 @app.post("/getGrantProposal")
 async def getGrantProposal(request: ChatRequest):
     try:
-        # request_json = request.json()
         idea_description = request.json()
         
         prompt = f"""Write a persuasive grant proposal for a non-profit organization based on this {idea_description}. Include:
@@ -233,65 +282,41 @@ async def getGrantProposal(request: ChatRequest):
 
 Use a conversational yet professional tone, incorporate storytelling elements, and emphasize the human impact of your work. Provide concrete examples and data to support your claims. Tailor the proposal to align with the goals and values of potential funders."""
 
-        response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant, expert in writing grant proposals for non-profits. Provide compelling, concise and accurate responses."
             },
-            json={
-                "model": "meta-llama/llama-3.2-3b-instruct:free",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are a helpful assistant, expert in writing grant proposals for non-profits. Provide compelling, concise and accurate responses."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
+            {
+                "role": "user",
+                "content": prompt
             }
-        )
+        ]
         
-        response.raise_for_status()
-        result = response.json()
+        result = make_openrouter_request(messages, endpoint_name="getGrantProposal")
         
         if "choices" in result and len(result["choices"]) > 0:
-            propContent = response.json()["choices"][0]["message"]["content"]
+            propContent = result["choices"][0]["message"]["content"]
 
             query = f"Grant proposal examples for {request.idea.mission}"
             citations = integrate_duckduckgo(query)
             combined_content = propContent + citations
 
             return combined_content
-
-
-            # pdf_bytes = text_to_pdf(propContent)
-            # # Return the PDF as a downloadable file
-            # return Response(
-            #     content=pdf_bytes,
-            #     media_type="application/pdf",
-            #     headers={"Content-Disposition": "attachment; filename=grant_proposal.pdf"}
-            # )
-            #     # return FileResponse(
-            #     #     pdf_buffer,
-            #     #     media_type="application/pdf",
-            #     #     headers={"Content-Disposition": "attachment; filename=grant_proposal.pdf"}
-            #     # )
-
-
         else:
             raise HTTPException(status_code=500, detail="Unexpected response format from OpenRouter API")
     
-    except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
 
 
 
 @app.post("/generatePitchText")
 async def generatePitchText(request: ChatRequest):
     try:
-
         request_json = request.json()
         prompt = f"""Create the transcript for a short compelling elevator pitch for this project {request_json} that aligns with the United Nations Sustainable Development Goals (SDGs). It should include:
         A Clear Introduction: Briefly introduce the project or idea and its relevance to sustainability.
@@ -301,38 +326,29 @@ async def generatePitchText(request: ChatRequest):
         Call to Action: Encourage listeners to get involved, support the project, or learn more.
         Make sure the pitch is engaging, concise (around 30-60 seconds), and emotionally resonant, appealing to the audience's sense of responsibility towards a sustainable future. Only generate the transcript, no ** or ##. Just output the transcript."""
 
-        response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a helpful assistant, expert in CREATING STELLAR elevator pitches for non-profits. Provide concise and accurate responses."
             },
-            json={
-                "model": "meta-llama/llama-3.2-3b-instruct:free",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are a helpful assistant, expert in CREATING STELLAR elevator pitches for non-profits. Provide concise and accurate responses."
-                    },
-                    {
-                        "role": "user",
-                        "content": prompt
-                    }
-                ]
+            {
+                "role": "user",
+                "content": prompt
             }
-        )
-
-        response.raise_for_status()
-        result = response.json()
+        ]
+        
+        result = make_openrouter_request(messages, endpoint_name="generatePitchText")
         
         if "choices" in result and len(result["choices"]) > 0:
-            return response.json()["choices"][0]["message"]["content"]
-            # cont = result["choices"][0]["message"]["content"]
-            # return {"pitch_text": cont}
+            return result["choices"][0]["message"]["content"]
         else:
             raise HTTPException(status_code=500, detail="Unexpected response format from OpenRouter API")
 
-    except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
 
 
 
@@ -542,31 +558,22 @@ async def generatePitchAudio(request: PitchTextRequest):
 async def getPlan(request: ChatRequest):
     try:
         request_json = request.json()
-        response = requests.post(
-            url="https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-            },
-           json={
-                "model": "meta-llama/llama-3.2-3b-instruct:free",
-                "messages": [
-                    {
-                        "role": "system",
-                        "content": "You are a consultant for non-profits. You receive details on the type of non-profit your client wants to create. You have 20 years of experience advising for clients across the globe, and specialize in creating business plans and actionable roadmaps for aspirational non-profit founders. You consider your clients' country of operation when providing advice. When you provide advice, you include website links to resources for your clients to follow. Double check these links work. Your output is a step-by-step non-profit creation plan with a timeline. Exclude fundraising from the step-by-step plan but include it in the timeline"
-                    },
-                    {
-                        "role": "user",
-                        "content": request_json
-                    }
-                ]
-            }
-        )
         
-        response.raise_for_status()
-        result = response.json()
+        messages = [
+            {
+                "role": "system",
+                "content": "You are a consultant for non-profits. You receive details on the type of non-profit your client wants to create. You have 20 years of experience advising for clients across the globe, and specialize in creating business plans and actionable roadmaps for aspirational non-profit founders. You consider your clients' country of operation when providing advice. When you provide advice, you include website links to resources for your clients to follow. Double check these links work. Your output is a step-by-step non-profit creation plan with a timeline. Exclude fundraising from the step-by-step plan but include it in the timeline"
+            },
+            {
+                "role": "user",
+                "content": request_json
+            }
+        ]
+        
+        result = make_openrouter_request(messages, endpoint_name="business_plan_roadmap")
         
         if "choices" in result and len(result["choices"]) > 0:
-            response_content = response.json()["choices"][0]["message"]["content"]
+            response_content = result["choices"][0]["message"]["content"]
         else:
             raise HTTPException(status_code=500, detail="Unexpected response format from OpenRouter API")
 
@@ -575,5 +582,8 @@ async def getPlan(request: ChatRequest):
         combined_response = response_content + citations
         return combined_response
 
-    except requests.RequestException as e:
-        raise HTTPException(status_code=500, detail=f"Error calling OpenRouter API: {str(e)}")
+    except HTTPException:
+        raise
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Error processing request: {str(e)}")
+
