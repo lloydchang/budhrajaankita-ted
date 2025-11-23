@@ -67,6 +67,13 @@ INFO: 127.0.0.1:61330 - "POST /business_plan_roadmap HTTP/1.1" 200 OK
 - **Speed:** Moderate (~2-4 seconds)
 - **Quality:** Good
 
+### Provider 3: Cloudflare Workers AI (Optional Fallback)
+- **Model:** `@cf/meta/llama-2-7b-chat-fp16`
+- **Free Tier:** 10,000 requests/day
+- **Speed:** Fast (~2-3 seconds)
+- **Quality:** Good
+- **Setup:** Requires API key + Account ID
+
 ## 🔍 Troubleshooting
 
 ### "No LLM API keys configured"

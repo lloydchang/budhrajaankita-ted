@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # Import the provider functions
-from main import call_gemini_api, call_openrouter_api, make_openrouter_request
+from main import call_gemini_api, call_openrouter_api, call_cloudflare_api, make_openrouter_request
 
 def test_gemini():
     """Test Google Gemini API directly"""
@@ -75,6 +75,42 @@ def test_openrouter():
             
     except Exception as e:
         print(f"❌ OpenRouter test failed: {str(e)}")
+        return False
+
+
+def test_cloudflare():
+    """Test Cloudflare Workers AI directly"""
+    print("\n" + "="*60)
+    print("Testing Cloudflare Workers AI")
+    print("="*60)
+    
+    if not os.getenv("CLOUDFLARE_API_KEY"):
+        print("❌ CLOUDFLARE_API_KEY not configured - skipping test")
+        return False
+    
+    if not os.getenv("CLOUDFLARE_ACCOUNT_ID"):
+        print("❌ CLOUDFLARE_ACCOUNT_ID not configured - skipping test")
+        return False
+    
+    try:
+        messages = [
+            {"role": "system", "content": "You are a helpful assistant."},
+            {"role": "user", "content": "Say 'Hello from Cloudflare!' and nothing else."}
+        ]
+        
+        print("📤 Sending test request to Cloudflare...")
+        result = call_cloudflare_api(messages, max_retries=1)
+        
+        if "choices" in result and len(result["choices"]) > 0:
+            content = result["choices"][0]["message"]["content"]
+            print(f"✅ Cloudflare response: {content}")
+            return True
+        else:
+            print("❌ Unexpected response format")
+            return False
+            
+    except Exception as e:
+        print(f"❌ Cloudflare test failed: {str(e)}")
         return False
 
 
@@ -146,16 +182,19 @@ def main():
     print("\n📋 Configuration Check:")
     print(f"   GEMINI_API_KEY: {'✅ Configured' if os.getenv('GEMINI_API_KEY') else '❌ Not configured'}")
     print(f"   OPENROUTER_API_KEY: {'✅ Configured' if os.getenv('OPENROUTER_API_KEY') else '❌ Not configured'}")
+    print(f"   CLOUDFLARE_API_KEY: {'✅ Configured' if os.getenv('CLOUDFLARE_API_KEY') else '❌ Not configured'}")
+    print(f"   CLOUDFLARE_ACCOUNT_ID: {'✅ Configured' if os.getenv('CLOUDFLARE_ACCOUNT_ID') else '❌ Not configured'}")
     
-    if not os.getenv("GEMINI_API_KEY") and not os.getenv("OPENROUTER_API_KEY"):
+    if not os.getenv("GEMINI_API_KEY") and not os.getenv("OPENROUTER_API_KEY") and not os.getenv("CLOUDFLARE_API_KEY"):
         print("\n❌ ERROR: No API keys configured!")
-        print("   Please add GEMINI_API_KEY and/or OPENROUTER_API_KEY to your .env file")
+        print("   Please add at least one of: GEMINI_API_KEY, OPENROUTER_API_KEY, or CLOUDFLARE_API_KEY to your .env file")
         sys.exit(1)
     
     # Run tests
     results = {
         "Gemini API": test_gemini(),
         "OpenRouter API": test_openrouter(),
+        "Cloudflare Workers AI": test_cloudflare(),
         "Multi-Provider System": test_multi_provider(),
         "Cache System": test_caching()
     }

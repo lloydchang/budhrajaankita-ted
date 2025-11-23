@@ -17,11 +17,19 @@
 - Improved error messages with provider-specific context
 - Maintains retry logic with exponential backoff
 
+#### Added Cloudflare Workers AI Support
+- Loaded `CLOUDFLARE_API_KEY` and `CLOUDFLARE_ACCOUNT_ID` from environment variables
+- Created `call_cloudflare_api()` function to handle Cloudflare API calls
+- Uses `@cf/meta/llama-2-7b-chat-fp16` model
+- Normalizes response format to match OpenRouter
+- Includes retry logic and error handling
+
 #### Implemented Multi-Provider Fallback System
 - Rewrote `make_openrouter_request()` to support multiple providers
 - **Provider Priority:**
   1. Google Gemini (Primary)
-  2. OpenRouter (Fallback)
+  2. OpenRouter (Secondary)
+  3. Cloudflare Workers AI (Tertiary - Optional)
 - Automatic failover if one provider fails
 - Detailed logging with emoji indicators for better visibility
 - Maintains backward compatibility with existing endpoint code
@@ -30,6 +38,7 @@
 - `✅` Cache hits
 - `🔵` Gemini availability
 - `🟢` OpenRouter availability
+- `🟠` Cloudflare availability
 - `📡` Provider attempt count
 - `🔄` Provider being tried
 - `❌` Provider failures

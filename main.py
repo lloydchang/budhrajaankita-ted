@@ -99,6 +99,8 @@ def text_to_pdf(text):
 
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
+CLOUDFLARE_API_KEY = os.getenv("CLOUDFLARE_API_KEY")
+CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
 
 
 def call_gemini_api(messages: list) -> dict:
@@ -226,6 +228,81 @@ def call_openrouter_api(messages: list, max_retries: int = 3) -> dict:
     raise Exception("Max retries exceeded for OpenRouter API")
 
 
+def call_cloudflare_api(messages: list, max_retries: int = 3) -> dict:
+    """
+    Call Cloudflare Workers AI API (Provider 3)
+    
+    Args:
+        messages: List of message dictionaries for the chat completion
+        max_retries: Maximum number of retry attempts
+        
+    Returns:
+        dict: Response in OpenRouter-compatible format
+        
+    Raises:
+        Exception: If all retries fail
+    """
+    if not CLOUDFLARE_API_KEY:
+        raise Exception("CLOUDFLARE_API_KEY not configured")
+    
+    if not CLOUDFLARE_ACCOUNT_ID:
+        raise Exception("CLOUDFLARE_ACCOUNT_ID not configured")
+    
+    # Cloudflare Workers AI endpoint
+    # Using Llama 2 7B model (free tier)
+    url = f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/meta/llama-2-7b-chat-fp16"
+    
+    for attempt in range(max_retries):
+        try:
+            response = requests.post(
+                url=url,
+                headers={
+                    "Authorization": f"Bearer {CLOUDFLARE_API_KEY}",
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "messages": messages
+                },
+                timeout=30
+            )
+            
+            response.raise_for_status()
+            data = response.json()
+            
+            # Extract content from Cloudflare response
+            # Cloudflare format: {"result": {"response": "text"}}
+            content = data.get("result", {}).get("response", "")
+            
+            if not content:
+                raise Exception("Cloudflare response missing content")
+            
+            # Convert to OpenRouter-compatible format
+            return {
+                "choices": [{
+                    "message": {
+                        "content": content,
+                        "role": "assistant"
+                    }
+                }]
+            }
+            
+        except requests.exceptions.HTTPError as e:
+            if response.status_code == 429:  # Rate limit error
+                wait_time = (2 ** attempt) * 2  # Exponential backoff: 2, 4, 8 seconds
+                print(f"Cloudflare rate limited. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
+                if attempt < max_retries - 1:
+                    time.sleep(wait_time)
+                    continue
+            raise Exception(f"Cloudflare API error {response.status_code}: {str(e)}")
+        except requests.RequestException as e:
+            if attempt < max_retries - 1:
+                time.sleep(2)
+                continue
+            raise Exception(f"Error calling Cloudflare API: {str(e)}")
+    
+    raise Exception("Max retries exceeded for Cloudflare API")
+
+
 def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", max_retries: int = 3, use_cache: bool = True) -> dict:
     """
     Make a request to LLM providers with multi-provider fallback, caching, and rate limiting
@@ -233,6 +310,7 @@ def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", m
     Provider order:
     1. Google Gemini API (if GEMINI_API_KEY is set)
     2. OpenRouter API (if OPENROUTER_API_KEY is set)
+    3. Cloudflare Workers AI (if CLOUDFLARE_API_KEY is set)
     
     Args:
         messages: List of message dictionaries for the chat completion
@@ -262,6 +340,9 @@ def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", m
     if OPENROUTER_API_KEY:
         providers.append(("OpenRouter", lambda msgs: call_openrouter_api(msgs, max_retries)))
         print(f"🟢 OpenRouter API available for {endpoint_name}")
+    if CLOUDFLARE_API_KEY and CLOUDFLARE_ACCOUNT_ID:
+        providers.append(("Cloudflare Workers AI", lambda msgs: call_cloudflare_api(msgs, max_retries)))
+        print(f"🟠 Cloudflare Workers AI available for {endpoint_name}")
     
     if not providers:
         raise HTTPException(status_code=500, detail="No LLM API keys configured")
