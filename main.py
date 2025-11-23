@@ -1,3 +1,4 @@
+# Main application file
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import FileResponse
 from starlette.background import BackgroundTask
