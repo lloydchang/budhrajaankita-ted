@@ -19,6 +19,17 @@ load_dotenv()
 
 app = FastAPI()
 
+# Configure Honeycomb observability
+try:
+    from otel_config import configure_opentelemetry, add_span_attribute, add_span_event, get_tracer
+    configure_opentelemetry(app, service_name="budhrajaankita-ted")
+except Exception as e:
+    print(f"⚠️  Failed to configure Honeycomb observability: {e}")
+    # Define no-op functions if OpenTelemetry is not available
+    def add_span_attribute(key, value): pass
+    def add_span_event(name, attributes=None): pass
+    def get_tracer(name="main"): return None
+
 ELEVENLABS_API_KEY = os.getenv("ELEVENLABS_API_KEY")
 
 print(f"ElevenLabs API Key loaded: {ELEVENLABS_API_KEY[:10] if ELEVENLABS_API_KEY else 'None'}...")
@@ -330,7 +341,12 @@ def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", m
         cached_response = cache.get(endpoint_name, cache_key)
         if cached_response is not None:
             print(f"✅ Cache hit for {endpoint_name}")
+            add_span_attribute("cache.hit", True)
+            add_span_attribute("endpoint.name", endpoint_name)
             return cached_response
+    
+    add_span_attribute("cache.hit", False)
+    add_span_attribute("endpoint.name", endpoint_name)
     
     # Build list of available providers
     providers = []
@@ -345,15 +361,23 @@ def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", m
         print(f"🟠 Cloudflare Workers AI available for {endpoint_name}")
     
     if not providers:
+        add_span_attribute("error", "No LLM API keys configured")
         raise HTTPException(status_code=500, detail="No LLM API keys configured")
     
+    add_span_attribute("providers.available", len(providers))
+    add_span_attribute("providers.list", ",".join([p[0] for p in providers]))
     print(f"📡 Attempting {len(providers)} provider(s) for {endpoint_name}")
     
     # Try each provider in order
     last_error = None
-    for provider_name, provider_func in providers:
+    for idx, (provider_name, provider_func) in enumerate(providers):
         try:
             print(f"🔄 Trying {provider_name}...")
+            add_span_event(f"trying_provider", {
+                "provider.name": provider_name,
+                "provider.index": idx,
+                "endpoint.name": endpoint_name
+            })
             
             # Apply rate limiting before making API call
             rate_limiter.wait_if_needed(f"{endpoint_name}_{provider_name}")
@@ -365,16 +389,30 @@ def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", m
                 cache.set(endpoint_name, cache_key, result)
             
             print(f"✅ {provider_name} succeeded for {endpoint_name}")
+            add_span_attribute("provider.used", provider_name)
+            add_span_attribute("provider.success", True)
+            add_span_attribute("provider.attempt", idx + 1)
+            add_span_event(f"provider_success", {
+                "provider.name": provider_name,
+                "endpoint.name": endpoint_name
+            })
             return result
             
         except Exception as e:
             last_error = e
             print(f"❌ {provider_name} failed: {str(e)}")
+            add_span_event(f"provider_failed", {
+                "provider.name": provider_name,
+                "error.message": str(e),
+                "endpoint.name": endpoint_name
+            })
             continue
     
     # All providers failed
     error_msg = f"All LLM providers failed. Last error: {str(last_error)}"
     print(f"🚨 {error_msg}")
+    add_span_attribute("provider.success", False)
+    add_span_attribute("error", error_msg)
     raise HTTPException(status_code=500, detail=error_msg)
 
 
