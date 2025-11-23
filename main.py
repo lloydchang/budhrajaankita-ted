@@ -111,12 +111,14 @@ def text_to_pdf(text):
 
 
 
+# Load API keys
 OPENROUTER_API_KEY = os.getenv("OPENROUTER_API_KEY")
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 CLOUDFLARE_API_KEY = os.getenv("CLOUDFLARE_API_KEY")
 CLOUDFLARE_ACCOUNT_ID = os.getenv("CLOUDFLARE_ACCOUNT_ID")
 
 
+@instrument_function("call_gemini_api")
 def call_gemini_api(messages: list) -> dict:
     """
     Call Google Gemini API (Provider 1)
@@ -125,30 +127,34 @@ def call_gemini_api(messages: list) -> dict:
         messages: List of message dictionaries for the chat completion
         
     Returns:
-        dict: Response in OpenRouter-compatible format
-        
-    Raises:
-        Exception: If the API call fails
+        dict: The API response JSON in OpenRouter-compatible format
     """
     if not GEMINI_API_KEY:
         raise Exception("GEMINI_API_KEY not configured")
     
-    # Convert messages to Gemini format
-    # Gemini uses a different format: contents with role and parts
+    start_time = time.time()
+    model_name = "gemini-2.0-flash-exp"
+    add_span_attribute("llm.provider", "Google Gemini")
+    add_span_attribute("llm.model", model_name)
+    
+    # Convert OpenRouter messages to Gemini format
     gemini_contents = []
     system_instruction = None
     
     for msg in messages:
-        if msg["role"] == "system":
-            # Gemini handles system messages differently
-            system_instruction = msg["content"]
-        else:
-            gemini_contents.append({
-                "role": "user" if msg["role"] == "user" else "model",
-                "parts": [{"text": msg["content"]}]
-            })
+        role = msg.get("role")
+        content = msg.get("content")
+        
+        if role == "system":
+            system_instruction = content
+        elif role == "user":
+            gemini_contents.append({"role": "user", "parts": [{"text": content}]})
+        elif role == "assistant":
+            gemini_contents.append({"role": "model", "parts": [{"text": content}]})
+            
+    add_span_attribute("request.message_count", len(messages))
     
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-exp:generateContent?key={GEMINI_API_KEY}"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/{model_name}:generateContent?key={GEMINI_API_KEY}"
     
     payload = {
         "contents": gemini_contents,
@@ -179,6 +185,22 @@ def call_gemini_api(messages: list) -> dict:
     
     if not content:
         raise Exception("Gemini response missing content")
+        
+    # Calculate duration
+    duration = time.time() - start_time
+    add_span_attribute("llm.latency_ms", duration * 1000)
+    add_span_attribute("response.length", len(content))
+    
+    # Try to extract usage metadata if available
+    usage_metadata = data.get("usageMetadata", {})
+    if usage_metadata:
+        prompt_tokens = usage_metadata.get("promptTokenCount", 0)
+        candidates_tokens = usage_metadata.get("candidatesTokenCount", 0)
+        total_tokens = usage_metadata.get("totalTokenCount", 0)
+        
+        add_span_attribute("llm.usage.prompt_tokens", prompt_tokens)
+        add_span_attribute("llm.usage.completion_tokens", candidates_tokens)
+        add_span_attribute("llm.usage.total_tokens", total_tokens)
     
     # Convert to OpenRouter-compatible format
     return {
@@ -191,6 +213,7 @@ def call_gemini_api(messages: list) -> dict:
     }
 
 
+@instrument_function("call_openrouter_api")
 def call_openrouter_api(messages: list, max_retries: int = 3) -> dict:
     """
     Call OpenRouter API (Provider 2)
@@ -208,27 +231,53 @@ def call_openrouter_api(messages: list, max_retries: int = 3) -> dict:
     if not OPENROUTER_API_KEY:
         raise Exception("OPENROUTER_API_KEY not configured")
     
+    start_time = time.time()
+    model_name = "meta-llama/llama-3.2-3b-instruct:free"
+    add_span_attribute("llm.provider", "OpenRouter")
+    add_span_attribute("llm.model", model_name)
+    add_span_attribute("request.message_count", len(messages))
+    
     for attempt in range(max_retries):
         try:
+            add_span_event("api_attempt", {"attempt": attempt + 1})
+            
             response = requests.post(
                 url="https://openrouter.ai/api/v1/chat/completions",
                 headers={
                     "Authorization": f"Bearer {OPENROUTER_API_KEY}",
                 },
                 json={
-                    "model": "meta-llama/llama-3.2-3b-instruct:free",
+                    "model": model_name,
                     "messages": messages
                 },
                 timeout=30
             )
             
             response.raise_for_status()
-            return response.json()
+            data = response.json()
+            
+            # Calculate duration
+            duration = time.time() - start_time
+            add_span_attribute("llm.latency_ms", duration * 1000)
+            
+            # Extract content length
+            content = data.get("choices", [{}])[0].get("message", {}).get("content", "")
+            add_span_attribute("response.length", len(content))
+            
+            # Extract usage if available
+            usage = data.get("usage", {})
+            if usage:
+                add_span_attribute("llm.usage.prompt_tokens", usage.get("prompt_tokens", 0))
+                add_span_attribute("llm.usage.completion_tokens", usage.get("completion_tokens", 0))
+                add_span_attribute("llm.usage.total_tokens", usage.get("total_tokens", 0))
+            
+            return data
             
         except requests.exceptions.HTTPError as e:
             if response.status_code == 429:  # Rate limit error
                 wait_time = (2 ** attempt) * 2  # Exponential backoff: 2, 4, 8 seconds
                 print(f"OpenRouter rate limited. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
+                add_span_event("rate_limited", {"wait_time": wait_time, "attempt": attempt + 1})
                 if attempt < max_retries - 1:
                     time.sleep(wait_time)
                     continue
@@ -242,6 +291,7 @@ def call_openrouter_api(messages: list, max_retries: int = 3) -> dict:
     raise Exception("Max retries exceeded for OpenRouter API")
 
 
+@instrument_function("call_cloudflare_api")
 def call_cloudflare_api(messages: list, max_retries: int = 3) -> dict:
     """
     Call Cloudflare Workers AI API (Provider 3)
@@ -262,12 +312,19 @@ def call_cloudflare_api(messages: list, max_retries: int = 3) -> dict:
     if not CLOUDFLARE_ACCOUNT_ID:
         raise Exception("CLOUDFLARE_ACCOUNT_ID not configured")
     
+    start_time = time.time()
+    model_name = "@cf/meta/llama-2-7b-chat-fp16"
+    add_span_attribute("llm.provider", "Cloudflare Workers AI")
+    add_span_attribute("llm.model", model_name)
+    add_span_attribute("request.message_count", len(messages))
+    
     # Cloudflare Workers AI endpoint
-    # Using Llama 2 7B model (free tier)
-    url = f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/@cf/meta/llama-2-7b-chat-fp16"
+    url = f"https://api.cloudflare.com/client/v4/accounts/{CLOUDFLARE_ACCOUNT_ID}/ai/run/{model_name}"
     
     for attempt in range(max_retries):
         try:
+            add_span_event("api_attempt", {"attempt": attempt + 1})
+            
             response = requests.post(
                 url=url,
                 headers={
@@ -283,12 +340,18 @@ def call_cloudflare_api(messages: list, max_retries: int = 3) -> dict:
             response.raise_for_status()
             data = response.json()
             
+            # Calculate duration
+            duration = time.time() - start_time
+            add_span_attribute("llm.latency_ms", duration * 1000)
+            
             # Extract content from Cloudflare response
             # Cloudflare format: {"result": {"response": "text"}}
             content = data.get("result", {}).get("response", "")
             
             if not content:
                 raise Exception("Cloudflare response missing content")
+            
+            add_span_attribute("response.length", len(content))
             
             # Convert to OpenRouter-compatible format
             return {
@@ -304,6 +367,7 @@ def call_cloudflare_api(messages: list, max_retries: int = 3) -> dict:
             if response.status_code == 429:  # Rate limit error
                 wait_time = (2 ** attempt) * 2  # Exponential backoff: 2, 4, 8 seconds
                 print(f"Cloudflare rate limited. Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
+                add_span_event("rate_limited", {"wait_time": wait_time, "attempt": attempt + 1})
                 if attempt < max_retries - 1:
                     time.sleep(wait_time)
                     continue
@@ -317,6 +381,7 @@ def call_cloudflare_api(messages: list, max_retries: int = 3) -> dict:
     raise Exception("Max retries exceeded for Cloudflare API")
 
 
+@instrument_function("make_openrouter_request")
 def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", max_retries: int = 3, use_cache: bool = True) -> dict:
     """
     Make a request to LLM providers with multi-provider fallback, caching, and rate limiting
@@ -338,14 +403,18 @@ def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", m
     Raises:
         HTTPException: If all providers fail
     """
+    start_time = time.time()
+    add_span_attribute("endpoint.name", endpoint_name)
+    add_span_attribute("request.message_count", len(messages))
     # Check cache first
     if use_cache:
         cache_key = {"messages": messages}
         cached_response = cache.get(endpoint_name, cache_key)
         if cached_response is not None:
+            cache_duration = time.time() - start_time
             print(f"✅ Cache hit for {endpoint_name}")
             add_span_attribute("cache.hit", True)
-            add_span_attribute("endpoint.name", endpoint_name)
+            add_span_attribute("total.duration_ms", cache_duration * 1000)
             return cached_response
     
     add_span_attribute("cache.hit", False)
@@ -392,12 +461,17 @@ def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", m
                 cache.set(endpoint_name, cache_key, result)
             
             print(f"✅ {provider_name} succeeded for {endpoint_name}")
+            
+            # Calculate total duration
+            total_duration = time.time() - start_time
+            add_span_attribute("total.duration_ms", total_duration * 1000)
             add_span_attribute("provider.used", provider_name)
             add_span_attribute("provider.success", True)
             add_span_attribute("provider.attempt", idx + 1)
             add_span_event(f"provider_success", {
                 "provider.name": provider_name,
-                "endpoint.name": endpoint_name
+                "endpoint.name": endpoint_name,
+                "duration_ms": total_duration * 1000
             })
             return result
             
@@ -412,8 +486,10 @@ def make_openrouter_request(messages: list, endpoint_name: str = "openrouter", m
             continue
     
     # All providers failed
+    total_duration = time.time() - start_time
     error_msg = f"All LLM providers failed. Last error: {str(last_error)}"
     print(f"🚨 {error_msg}")
+    add_span_attribute("total.duration_ms", total_duration * 1000)
     add_span_attribute("provider.success", False)
     add_span_attribute("error", error_msg)
     raise HTTPException(status_code=500, detail=error_msg)
